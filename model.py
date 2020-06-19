@@ -113,42 +113,42 @@ class SSD(nn.Module):
 		if phase == "inference":
 			self.detect = Detect()
 
-def forward(self, x):
-	sources = []
-	loc = []
-	conf = []
+	def forward(self, x):
+		sources = []
+		loc = []
+		conf = []
 
-	for k in range(23):
-		x = self.vgg[k](xac)
-	#source1
-	source1 = self.L2Norm(x)
-	sources.append(source1)
+		for k in range(23):
+			x = self.vgg[k](x)
+		#source1
+		source1 = self.L2Norm(x)
+		sources.append(source1)
 
-	for k in range(23, len(self.vgg)):
-		x = self.vgg[k](x)
-	sources.append(x) # source2
+		for k in range(23, len(self.vgg)):
+			x = self.vgg[k](x)
+		sources.append(x) # source2
 
-	# source3-6
-	for k, v in enumerate(self.extras):
-		x = nn.ReLU(v(x), inplace=True)
-		if k%2 == 1:
-			sources.append(x)
-	for (x, l, c) in zip(sources, self.loc, self.conf):
-		loc.append(l(x).permute(0, 2, 3, 1).contigous())
-		conf.append(c(x).permute(0, 2, 3, 1).contigous())
+		# source3-6
+		for k, v in enumerate(self.extras):
+			x = nn.ReLU(v(x), inplace=True)
+			if k%2 == 1:
+				sources.append(x)
+		for (x, l, c) in zip(sources, self.loc, self.conf):
+			loc.append(l(x).permute(0, 2, 3, 1).contigous())
+			conf.append(c(x).permute(0, 2, 3, 1).contigous())
 
-	loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
-	conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
+		loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
+		conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
 
-	loc = loc.view(loc.size(0), -1, 4)
-	conf = conf.view(conf.size(0), -1, self.num_classes)
+		loc = loc.view(loc.size(0), -1, 4)
+		conf = conf.view(conf.size(0), -1, self.num_classes)
 
-	output = (loc, conf, self.dbox_list)
+		output = (loc, conf, self.dbox_list)
 
-	if phase == "inference":
-		return self.detect(output[0], output[1], output[2])
-	else:
-		return output
+		if phase == "inference":
+			return self.detect(output[0], output[1], output[2])
+		else:
+			return output
 
 def decode(loc, defbox_list):
 	boxes = torch.cat((defbox_list[:, :2] + 0.1*loc[:, :2]*defbox_list[:, 2:],

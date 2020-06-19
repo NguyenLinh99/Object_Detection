@@ -163,6 +163,7 @@ class ConvertColor(object):
         elif self.current == 'HSV' and self.transform == 'BGR':
             image = cv2.cvtColor(image, cv2.COLOR_HSV2BGR)
         else:
+            print("hi")
             raise NotImplementedError
         return image, boxes, labels
 

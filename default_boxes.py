@@ -1,4 +1,5 @@
 from lib import *
+from l2_norm import L2Norm
 
 cfg = {
 	"num_classes": 21, # VOC data
