@@ -1,5 +1,7 @@
 # Build module of SSD model
 from lib import *
+from default_boxes import DefBox
+from l2_norm import L2Norm
 
 def create_vgg():
 	layers = []
@@ -82,12 +84,113 @@ def create_loc_conf(num_classes=21, bbox_ratio_num=[4, 6, 6, 6, 4, 4]):
 
 	return nn.ModuleList(loc_layers), nn.ModuleList(conf_layers)
 
-if __name__ == '__main__':
-	vgg = create_vgg()
-	print(vgg)
-	extras = create_extras()
-	print(extras)
+cfg = {
+	"num_classes": 21, # VOC data
+	"input_size": 300, # SSD300
+	"bbox_aspect_num": [4, 6, 6, 6, 4, 4], 
+	"feature_maps": [38, 19, 10, 5, 3, 1],
+	"steps": [8, 16, 32, 64, 100, 300],
+	"min_size": [30, 60, 111, 162, 213, 264],
+	"max_size": [60, 111, 162, 213, 264, 315],
+	"aspect_ratios": [[2], [2, 3], [2, 3], [2, 3], [2], [2]]
+}
 
-	loc, conf = create_loc_conf()
-	print(loc)
-	print(conf)
+class SSD(nn.Module):
+	def __init__(self, phase, cfg):
+		super(SSD, self).__init__()
+		self.phase = phase
+		self.num_classes = cfg["num_classes"]
+
+		# create main module
+		self.vgg = create_vgg()
+		self.extras = create_extras()
+		self.loc, self.conf = create_loc_conf(cfg["num_classes"], cfg["bbox_aspect_num"])
+		self.L2Norm = L2Norm()
+		# default box
+		dbox = DefBox(cfg)
+		self.dbox_list = dbox.create_defbox()
+
+		if phase == "inference":
+			self.detect = Detect()
+
+def decode(loc, defbox_list):
+	boxes = torch.cat((defbox_list[:, :2] + 0.1*loc[:, :2]*defbox_list[:, 2:],
+		defbox_list[:, 2:]*torch.exp(loc[:, 2:]*0.2)), dim=1)
+	boxes[:, :2] -= boxes[:, 2:]/2
+	boxes[:, 2:] += boxes[:, :2]
+
+	return boxes
+
+def nms(boxes, scores, overlap=0.45, top_k=200):
+	count = 0
+	keep = scores.new(scores.size()).zero_().long()
+
+	# boxes coordinate
+	x1 = boxes[:, 0]
+	y1 = boxes[:, 1]
+	x2 = boxes[:, 2]
+	y2 = boxes[:, 3]
+
+	# area of boxes
+	area = torch.mul(x2-x1, y2-y1)
+
+	tmp_x1 = boxes.new()
+	tmp_y1 = boxes.new()
+	tmp_x2 = boxes.new()
+	tmp_y2 = boxes.new()
+	tmp_w = boxes.new()
+	tmp_h = boxes.new()
+
+	value, idx = scores.sort(0)
+	idx = idx[-top_k:] # id of top 200 boxes with confidence max
+
+	while idx.numel() > 0:
+		i = idx[-1] # id of bording box with confidence max
+		keep[count] = i
+		count += 1
+
+		if idx.size(0) == 1:
+			break
+		idx = idx[:-1] # id of boxes tru box co do tu tin max
+
+		# information box
+		torch.index_select(x1, 0, idx, out=tmp_x1)
+		torch.index_select(y1, 0, idx, out=tmp_y1)
+		torch.index_select(x2, 0, idx, out=tmp_x2)
+		torch.index_select(y2, 0, idx, out=tmp_y2)
+
+		tmp_x1 = torch.clamp(tmp_x1, min=x1[i])
+		tmp_y1 = torch.clamp(tmp_y1, min=y1[i])
+		tmp_x2 = torch.clamp(tmp_x2, max=x2[i])
+		tmp_y2 = torch.clamp(tmp_y2, min=y2[i])
+
+		# chuyen ve tensor co size ma index giam di 1
+		tmp_w.resize_as_(tmp_x2)
+		tmp_h.resize_as_(tmp_y2)
+		tmp_w = tmp_x2-tmp_x1
+		tmp_h = tmp_y2-tmp_y1
+
+		tmp_w = torch.clamp(tmp_w, min=0.0)
+		tmp_h = torch.clamp(tmp_h, min=0.0)
+
+		inter = tmp_w*tmp_h
+		others_area = torch.index_select(area, 0, idx)
+		union = area[i] + others_area - inter
+
+		iou = inter/union
+
+		idx = idx[iou.le(overlap)]
+
+	return keep, count
+
+if __name__ == '__main__':
+	# vgg = create_vgg()
+	# print(vgg)
+	# extras = create_extras()
+	# print(extras)
+
+	# loc, conf = create_loc_conf()
+	# print(loc)
+	# print(conf)
+	ssd = SSD(phase="train", cfg=cfg)
+	print(ssd)
