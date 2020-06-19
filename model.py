@@ -113,6 +113,43 @@ class SSD(nn.Module):
 		if phase == "inference":
 			self.detect = Detect()
 
+def forward(self, x):
+	sources = []
+	loc = []
+	conf = []
+
+	for k in range(23):
+		x = self.vgg[k](xac)
+	#source1
+	source1 = self.L2Norm(x)
+	sources.append(source1)
+
+	for k in range(23, len(self.vgg)):
+		x = self.vgg[k](x)
+	sources.append(x) # source2
+
+	# source3-6
+	for k, v in enumerate(self.extras):
+		x = nn.ReLU(v(x), inplace=True)
+		if k%2 == 1:
+			sources.append(x)
+	for (x, l, c) in zip(sources, self.loc, self.conf):
+		loc.append(l(x).permute(0, 2, 3, 1).contigous())
+		conf.append(c(x).permute(0, 2, 3, 1).contigous())
+
+	loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
+	conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
+
+	loc = loc.view(loc.size(0), -1, 4)
+	conf = conf.view(conf.size(0), -1, self.num_classes)
+
+	output = (loc, conf, self.dbox_list)
+
+	if phase == "inference":
+		return self.detect(output[0], output[1], output[2])
+	else:
+		return output
+
 def decode(loc, defbox_list):
 	boxes = torch.cat((defbox_list[:, :2] + 0.1*loc[:, :2]*defbox_list[:, 2:],
 		defbox_list[:, 2:]*torch.exp(loc[:, 2:]*0.2)), dim=1)
@@ -183,14 +220,57 @@ def nms(boxes, scores, overlap=0.45, top_k=200):
 
 	return keep, count
 
-if __name__ == '__main__':
-	# vgg = create_vgg()
-	# print(vgg)
-	# extras = create_extras()
-	# print(extras)
+class Detect(Function):
+	def __init__(self, conf_thresh=0.01, top_k=200, nms_thresh=0.45):
+		self.softmax = nn.Softmax(dim=-1)
+		self.conf_thresh = conf_thresh
+		self.top_k = top_k
+		self.nms_thresh = nms.nms_thresh
 
-	# loc, conf = create_loc_conf()
-	# print(loc)
-	# print(conf)
-	ssd = SSD(phase="train", cfg=cfg)
-	print(ssd)
+	def forward(self, loc_data, conf_data, dbox_list):
+		num_batch = loc_data.size(0) # batch size
+		num_dbox = loc_data.size(1) # 8732
+		num_classes = conf_data.size(2) # 21
+
+		conf_data = self.softmax(conf_data)
+		conf_preds = conf_data.transpose(2, 1)
+
+		output = torch.zeros(num_batch, num_classes, self.top_k, 5)
+
+		# xu ly tung buc anh trong 1 bach cac buc anh
+		for i in range(num_batch):
+			# tinh bbox tu offset information va default box
+			decode_boxes = decode(loc_data[i], dbox_list)
+
+			# copy confidence score cua anh thu i
+			conf_scores = conf_preds[i].clone()
+
+			for cl in range(1, num_classes):
+				c_mask = conf_preds[cl].gt(self.conf_thresh) # chi lay nhung confidence > 0.01
+				scores = conf_preds[cl][c_mask]
+
+				if scores.element() == 0:
+					continue
+
+				# dua chieu ve giong chieu cua decode_boxes de tinh toan
+				l_mask = c_mask.unsquzee(1).enpand_as(decode_boxes)
+
+				boxes = decode_boxes[l_mask].view(-1, 4)
+
+				ids, count = nms(boxes, scores, self.nms_thresh, self.top_k)
+
+				output[i, cl, :count] = torch.cat((scores[ids[:count]].unsquzee(1), boxes[ids[:count]]), 1)
+
+		return output
+
+# if __name__ == '__main__':
+# 	# vgg = create_vgg()
+# 	# print(vgg)
+# 	# extras = create_extras()
+# 	# print(extras)
+
+# 	# loc, conf = create_loc_conf()
+# 	# print(loc)
+# 	# print(conf)
+# 	ssd = SSD(phase="train", cfg=cfg)
+# 	print(ssd)
