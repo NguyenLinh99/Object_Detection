@@ -87,7 +87,7 @@ def create_loc_conf(num_classes=21, bbox_ratio_num=[4, 6, 6, 6, 4, 4]):
 cfg = {
 	"num_classes": 21, # VOC data
 	"input_size": 300, # SSD300
-	"bbox_aspect_num": [4, 6, 6, 6, 4, 4], 
+	"bbox_aspect_num": [4, 6, 6, 6, 4, 4],
 	"feature_maps": [38, 19, 10, 5, 3, 1],
 	"steps": [8, 16, 32, 64, 100, 300],
 	"min_size": [30, 60, 111, 162, 213, 264],
@@ -130,12 +130,12 @@ class SSD(nn.Module):
 
 		# source3-6
 		for k, v in enumerate(self.extras):
-			x = nn.ReLU(v(x), inplace=True)
+			x = F.relu(v(x), inplace=True)
 			if k%2 == 1:
 				sources.append(x)
 		for (x, l, c) in zip(sources, self.loc, self.conf):
-			loc.append(l(x).permute(0, 2, 3, 1).contigous())
-			conf.append(c(x).permute(0, 2, 3, 1).contigous())
+			loc.append(l(x).permute(0, 2, 3, 1).contiguous())
+			conf.append(c(x).permute(0, 2, 3, 1).contiguous())
 
 		loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
 		conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
@@ -145,7 +145,7 @@ class SSD(nn.Module):
 
 		output = (loc, conf, self.dbox_list)
 
-		if phase == "inference":
+		if self.phase == "inference":
 			return self.detect(output[0], output[1], output[2])
 		else:
 			return output
